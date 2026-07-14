@@ -1,0 +1,39 @@
+name: Build
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+jobs:
+  build:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v5
+      - run: |
+          set -euo pipefail
+          VERSION=$(date +'%Y.%-m%d.%-H%M')
+          APP_VERSION=$(yq -r '.spec.template.spec.containers[] | select(.name == "helm-controller") | .image | split(":") | .[1]' manifests/deployment.yaml | sed -E 's/^//')
+          echo "Packaging chart version ${VERSION} for application version ${APP_VERSION} ..."
+          yq -i -r ".version = \"${VERSION}\"" chart/Chart.yaml
+          yq -i -r ".appVersion = \"${APP_VERSION}\"" chart/Chart.yaml
+          mkdir -p chart/{crds,templates}/
+          cp -r pkg/crds/yaml/generated/. chart/crds/
+          cp manifests/{deployment,rbac}.yaml chart/templates/
+          helm package -d dist/ chart/
+          helm repo index dist/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
